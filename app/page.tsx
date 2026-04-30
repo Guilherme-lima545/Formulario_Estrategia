@@ -108,13 +108,25 @@ export default function GerarFlyerPage() {
   const [temprofessor, setTemProfessor] = useState(false);
   const [form, setForm] = useState<FlyerFormData>(defaultForm());
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<{
-    type: 'idle' | 'loading' | 'success' | 'error';
-    msg: string;
-  }>({ type: 'idle', msg: '' });
+  const [status, setStatus] = useState({
+  type: 'idle',
+  msg: '',
+})
+  const [etapas, setEtapas] = useState<
+    {
+      id: string;
+      msg: string;
+      status: 'pending' | 'loading' | 'done' | 'error';
+    }[]
+  >([
+    { id: 'start', msg: 'Aguardando...', status: 'pending' },
+    { id: 'ai', msg: 'Aguardando...', status: 'pending' },
+    { id: 'drive', msg: 'Aguardando...', status: 'pending' },
+    { id: 'done', msg: 'Aguardando...', status: 'pending' },
+  ]);
   const [resultado, setResultado] = useState<{
-    pngBase64: string;
     driveUrl: string;
+    htmlContent: string;
   } | null>(null);
   const logoRef = useRef<HTMLInputElement>(null);
   const ebookRef = useRef<HTMLInputElement>(null);
@@ -210,39 +222,89 @@ export default function GerarFlyerPage() {
   };
 
   const handleGerar = async () => {
-    if (!form.nomeConc || !form.orgao) {
-      setStatus({
-        type: 'error',
-        msg: 'Preencha o nome do concurso e o órgão (aba 1).',
-      });
-      return;
-    }
-    setLoading(true);
-    setStatus({ type: 'loading', msg: 'Gerando flyer com IA...' });
-    setResultado(null);
+  console.log('🚀 handleGerar chamado!')
+  alert('clicou!')
+  if (!form.nomeConc || !form.orgao) {
+    alert('Preencha nome do concurso e órgão');
+    return;
+  }
 
-    try {
-      const res = await fetch('/api/gerar-flyer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro desconhecido');
+  console.log('✅ Validação passou, nome:', form.nomeConc, 'orgao:', form.orgao)
 
-      setResultado({ pngBase64: data.pngBase64, driveUrl: data.driveUrl });
-      setStatus({
-        type: 'success',
-        msg: 'Flyer gerado e salvo no Google Drive!',
-      });
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Erro ao gerar flyer';
-      setStatus({ type: 'error', msg: message });
-    } finally {
-      setLoading(false);
+
+  setLoading(true);
+  setResultado(null);
+  setEtapas([
+    { id: 'start', msg: 'Iniciando...', status: 'loading' },
+    { id: 'ai',    msg: 'Gerando flyer com IA...', status: 'pending' },
+    { id: 'drive', msg: 'Salvando no Google Drive...', status: 'pending' },
+    { id: 'done',  msg: 'Concluído!', status: 'pending' },
+  ]);
+
+  console.log('📡 Chamando fetch...')
+
+
+  try {
+    const res = await fetch('/api/gerar-flyer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    });
+
+    console.log('📡 Fetch respondeu! Status:', res.status)
+
+
+    if (!res.ok) throw new Error(`Erro HTTP: ${res.status}`);
+    if (!res.body) throw new Error('Servidor não respondeu');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const json = JSON.parse(line.replace('data: ', ''));
+          const { step, msg, driveUrl, htmlContent } = json;
+
+          console.log('📨 SSE recebido:', step, msg);
+
+          setEtapas((prev) =>
+            prev.map((e) => {
+              if (step === 'start'      && e.id === 'start') return { ...e, msg, status: 'done' };
+              if (step === 'ai'         && e.id === 'ai')    return { ...e, msg, status: 'loading' };
+              if (step === 'ai_done'    && e.id === 'ai')    return { ...e, msg, status: 'done' };
+              if (step === 'drive'      && e.id === 'drive') return { ...e, msg, status: 'loading' };
+              if (step === 'drive_done' && e.id === 'drive') return { ...e, msg, status: 'done' };
+              if (step === 'done'       && e.id === 'done')  return { ...e, msg, status: 'done' };
+              if (step === 'error') return { ...e, msg, status: 'error' };
+              return e;
+            })
+          );
+
+          if (step === 'done') setResultado({ driveUrl, htmlContent });
+          if (step === 'error') throw new Error(msg);
+        } catch (parseErr) {
+          console.warn('Linha inválida:', line);
+        }
+      }
     }
-  };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Erro desconhecido';
+    console.error('❌ Erro:', message);
+    setEtapas((prev) => prev.map((e) => ({ ...e, msg: message, status: 'error' })));
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <>
@@ -793,6 +855,26 @@ export default function GerarFlyerPage() {
                   placeholder="Ex: Concurso regido pelo Edital nº 001/2025..."
                 />
               </Field>
+              
+        <div className={styles.progressBox}>
+          {etapas.map((e, i) => (
+            <div
+              key={i}
+              className={`${styles.progressStep} ${styles[e.status]}`}
+            >
+              <span className={styles.progressIcon}>
+                {e.status === 'done'
+                  ? '✅'
+                  : e.status === 'loading'
+                    ? '⏳'
+                    : e.status === 'error'
+                      ? '❌'
+                      : '○'}
+              </span>
+              <span>{e.msg}</span>
+            </div>
+          ))}
+        </div>
             </div>
           </>
         )}
@@ -817,38 +899,36 @@ export default function GerarFlyerPage() {
               {loading ? <span className={styles.spinner} /> : '✦'} Gerar e
               exportar flyer
             </button>
+            
           )}
         </div>
 
-        {status.type !== 'idle' && (
-          <div className={`${styles.statusBar} ${styles[status.type]}`}>
-            {status.type === 'loading' && <span className={styles.spinner} />}
-            {status.msg}
-          </div>
-        )}
+        
 
         {resultado && (
-          <div className={styles.card} style={{ marginTop: '1rem' }}>
-            <div className={styles.sectionTitle}>Preview do flyer</div>
-            <img
-              src={`data:image/png;base64,${resultado.pngBase64}`}
-              alt="Flyer gerado"
-              style={{
-                width: '100%',
-                borderRadius: 8,
-                border: '0.5px solid var(--color-border-tertiary)',
-              }}
-            />
-            <a
-              href={resultado.driveUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.driveLink}
-            >
-              ↗ Abrir no Google Drive
-            </a>
-          </div>
-        )}
+  <div className={styles.card} style={{ marginTop: '1rem' }}>
+    <div className={styles.sectionTitle}>Flyer gerado!</div>
+    <iframe
+      srcDoc={resultado.htmlContent}
+      style={{ width: '100%', height: '800px', border: 'none', borderRadius: 8 }}
+    />
+    <button
+      className={styles.btnPrimary}
+      style={{ marginTop: 12 }}
+      onClick={() => {
+        const blob = new Blob([resultado.htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${form.nomeConc} - Flyer.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }}
+    >
+      ⬇ Baixar flyer
+    </button>
+  </div>
+)}
       </div>
     </>
   );

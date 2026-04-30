@@ -383,3 +383,48 @@
   .rowEntry { grid-template-columns: 1fr 1fr auto; }
   .tabBtn { font-size: 11px; }
 }
+
+.progressBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--color-background-secondary, #f9f9f9);
+  border: 0.5px solid var(--color-border-tertiary, #e5e5e5);
+  border-radius: 12px;
+}
+ 
+.progressStep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--color-text-secondary, #888);
+  transition: all 0.2s;
+}
+ 
+.progressStep.loading {
+  background: var(--color-background-info, #e6f1fb);
+  color: var(--color-text-info, #185fa5);
+  font-weight: 500;
+}
+ 
+.progressStep.done {
+  color: var(--color-text-success, #3b6d11);
+}
+ 
+.progressStep.error {
+  background: var(--color-background-danger, #fcebeb);
+  color: var(--color-text-danger, #a32d2d);
+}
+ 
+.progressIcon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+ 
