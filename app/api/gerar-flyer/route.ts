@@ -11,14 +11,19 @@ async function gerarFlyer(data: FlyerFormData): Promise<string> {
   // Groq só gera a frase de destaque
   const completion = await groq.chat.completions.create({
     model: 'llama-3.3-70b-versatile',
-    messages: [{
-      role: 'user',
-      content: `Crie UMA frase de destaque curta e impactante (máximo 10 palavras) para divulgar o concurso "${data.nomeConc}" do órgão "${data.orgao}". Retorne APENAS a frase, sem aspas, sem explicação.`
-    }],
+    messages: [
+      {
+        role: 'user',
+        content: `Crie UMA frase de destaque curta e impactante (máximo 10 palavras) para divulgar o concurso "${data.nomeConc}" do órgão "${data.orgao}". Retorne APENAS a frase, sem aspas, sem explicação.`,
+      },
+    ],
     max_tokens: 50,
   });
 
-  const frase = completion.choices?.[0]?.message?.content?.trim() || data.fraseDestaque || 'Sua aprovação começa aqui!';
+  const frase =
+    completion.choices?.[0]?.message?.content?.trim() ||
+    data.fraseDestaque ||
+    'Sua aprovação começa aqui!';
 
   const vaga = data.vagas?.[0];
   const salario = vaga?.salario ? `R$ ${vaga.salario}` : '—';
@@ -27,7 +32,20 @@ async function gerarFlyer(data: FlyerFormData): Promise<string> {
   const formatarData = (dt: string) => {
     if (!dt) return '—';
     const [ano, mes, dia] = dt.split('-');
-    const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    const meses = [
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez',
+    ];
     return `${dia} ${meses[parseInt(mes) - 1]} ${ano}`;
   };
 
@@ -38,7 +56,12 @@ async function gerarFlyer(data: FlyerFormData): Promise<string> {
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Montserrat', sans-serif; }
+body { 
+  font-family: 'Montserrat', sans-serif;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center; }
 .flyer {
   width: 390px;
   height: 693px;
@@ -235,7 +258,28 @@ body { font-family: 'Montserrat', sans-serif; }
           <div class="info-valor">${data.taxa || '—'}</div>
         </div>
       </div>
-      <div class="frase">"${frase}"</div>
+      ${
+        data.temProfessor && data.professores?.length > 0
+          ? `
+<div style="display:flex; gap:10px; margin-bottom:14px; align-items:center;">
+  ${data.professores
+    .slice(0, 3)
+    .map(
+      (p) => `
+    <div style="display:flex; align-items:center; gap:8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:8px 12px; flex:1;">
+      ${p.fotoBase64 ? `<img src="${p.fotoBase64}" style="width:36px; height:36px; border-radius:50%; object-fit:cover; flex-shrink:0;" />` : `<div style="width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,${data.corPrincipal},${data.corDestaque}); flex-shrink:0;"></div>`}
+      <div>
+        <div style="font-size:11px; font-weight:700; color:#fff;">${p.nome || 'Professor'}</div>
+        <div style="font-size:9px; color:rgba(255,255,255,0.5);">${p.especialidade || ''}</div>
+      </div>
+    </div>
+  `,
+    )
+    .join('')}
+</div>`
+          : ''
+      }
+<div class="frase">"${frase}"</div>
       <div class="footer">
         <div class="footer-handle">@${data.orgao.toLowerCase().replace(/\s/g, '')}</div>
         <div class="cta-btn">Inscreva-se</div>
@@ -253,9 +297,11 @@ async function htmlParaJpg(html: string): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Basic ' + Buffer.from(
-        `${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`
-      ).toString('base64'),
+      Authorization:
+        'Basic ' +
+        Buffer.from(
+          `${process.env.HCTI_USER_ID}:${process.env.HCTI_API_KEY}`,
+        ).toString('base64'),
     },
     body: JSON.stringify({
       html,
@@ -268,7 +314,7 @@ async function htmlParaJpg(html: string): Promise<string> {
   console.log('🖼️ HCTI resposta:', data);
 
   if (!data.url) throw new Error('HCTI não retornou URL da imagem');
-  return data.url; 
+  return data.url;
 }
 
 export async function GET() {
@@ -282,7 +328,9 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const send = (payload: object) => {
         console.log('📤 SSE:', payload);
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(payload)}\n\n`),
+        );
       };
 
       try {
@@ -310,7 +358,6 @@ export async function POST(req: NextRequest) {
         send({ step: 'drive_done', msg: 'JPG pronto!' });
 
         send({ step: 'done', msg: 'Concluído!', jpgUrl, htmlContent });
-
       } catch (err: unknown) {
         console.error('❌ ERRO:', err);
         const message = err instanceof Error ? err.message : 'Erro interno';
@@ -326,7 +373,7 @@ export async function POST(req: NextRequest) {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
     },
   });
 }
