@@ -6,7 +6,6 @@ import styles from '@/app/page.module.css';
 import Image from 'next/image';
 import Logo from '@/public/images.png';
 
-const TITULACOES = ['Graduado', 'Especialista', 'Mestre', 'Doutor'];
 
 const ESTILOS = [
   'Formal / Governamental',
@@ -109,9 +108,9 @@ export default function GerarFlyerPage() {
   const [form, setForm] = useState<FlyerFormData>(defaultForm());
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState({
-  type: 'idle',
-  msg: '',
-})
+    type: 'idle',
+    msg: '',
+  });
   const [etapas, setEtapas] = useState<
     {
       id: string;
@@ -125,7 +124,7 @@ export default function GerarFlyerPage() {
     { id: 'done', msg: 'Aguardando...', status: 'pending' },
   ]);
   const [resultado, setResultado] = useState<{
-    driveUrl: string;
+    jpgUrl: string;
     htmlContent: string;
   } | null>(null);
   const logoRef = useRef<HTMLInputElement>(null);
@@ -222,89 +221,101 @@ export default function GerarFlyerPage() {
   };
 
   const handleGerar = async () => {
-  console.log('🚀 handleGerar chamado!')
-  alert('clicou!')
-  if (!form.nomeConc || !form.orgao) {
-    alert('Preencha nome do concurso e órgão');
-    return;
-  }
+    if (!form.nomeConc || !form.orgao) {
+      alert('Preencha nome do concurso e órgão');
+      return;
+    }
 
-  console.log('✅ Validação passou, nome:', form.nomeConc, 'orgao:', form.orgao)
+    console.log(
+      '✅ Validação passou, nome:',
+      form.nomeConc,
+      'orgao:',
+      form.orgao,
+    );
 
+    setLoading(true);
+    setResultado(null);
+    setEtapas([
+      { id: 'start', msg: 'Iniciando...', status: 'loading' },
+      { id: 'ai', msg: 'Gerando flyer com IA...', status: 'pending' },
+      { id: 'drive', msg: 'Salvando no Google Drive...', status: 'pending' },
+      { id: 'done', msg: 'Concluído!', status: 'pending' },
+    ]);
 
-  setLoading(true);
-  setResultado(null);
-  setEtapas([
-    { id: 'start', msg: 'Iniciando...', status: 'loading' },
-    { id: 'ai',    msg: 'Gerando flyer com IA...', status: 'pending' },
-    { id: 'drive', msg: 'Salvando no Google Drive...', status: 'pending' },
-    { id: 'done',  msg: 'Concluído!', status: 'pending' },
-  ]);
+    console.log('📡 Chamando fetch...');
 
-  console.log('📡 Chamando fetch...')
+    try {
+      const res = await fetch('/api/gerar-flyer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
 
+      console.log('📡 Fetch respondeu! Status:', res.status);
 
-  try {
-    const res = await fetch('/api/gerar-flyer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
+      if (!res.ok) throw new Error(`Erro HTTP: ${res.status}`);
+      if (!res.body) throw new Error('Servidor não respondeu');
 
-    console.log('📡 Fetch respondeu! Status:', res.status)
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-    if (!res.ok) throw new Error(`Erro HTTP: ${res.status}`);
-    if (!res.body) throw new Error('Servidor não respondeu');
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const json = JSON.parse(line.replace('data: ', ''));
+            const { step, msg, driveUrl, htmlContent } = json;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+            console.log('📨 SSE recebido:', step, msg);
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+            setEtapas((prev) =>
+              prev.map((e) => {
+                if (step === 'start' && e.id === 'start')
+                  return { ...e, msg, status: 'done' };
+                if (step === 'ai' && e.id === 'ai')
+                  return { ...e, msg, status: 'loading' };
+                if (step === 'ai_done' && e.id === 'ai')
+                  return { ...e, msg, status: 'done' };
+                if (step === 'drive' && e.id === 'drive')
+                  return { ...e, msg, status: 'loading' };
+                if (step === 'drive_done' && e.id === 'drive')
+                  return { ...e, msg, status: 'done' };
+                if (step === 'done' && e.id === 'done')
+                  return { ...e, msg, status: 'done' };
+                if (step === 'error') return { ...e, msg, status: 'error' };
+                return e;
+              }),
+            );
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const json = JSON.parse(line.replace('data: ', ''));
-          const { step, msg, driveUrl, htmlContent } = json;
-
-          console.log('📨 SSE recebido:', step, msg);
-
-          setEtapas((prev) =>
-            prev.map((e) => {
-              if (step === 'start'      && e.id === 'start') return { ...e, msg, status: 'done' };
-              if (step === 'ai'         && e.id === 'ai')    return { ...e, msg, status: 'loading' };
-              if (step === 'ai_done'    && e.id === 'ai')    return { ...e, msg, status: 'done' };
-              if (step === 'drive'      && e.id === 'drive') return { ...e, msg, status: 'loading' };
-              if (step === 'drive_done' && e.id === 'drive') return { ...e, msg, status: 'done' };
-              if (step === 'done'       && e.id === 'done')  return { ...e, msg, status: 'done' };
-              if (step === 'error') return { ...e, msg, status: 'error' };
-              return e;
-            })
-          );
-
-          if (step === 'done') setResultado({ driveUrl, htmlContent });
-          if (step === 'error') throw new Error(msg);
-        } catch (parseErr) {
-          console.warn('Linha inválida:', line);
+            if (step === 'done')
+              setResultado({
+                jpgUrl: json.jpgUrl,
+                htmlContent: json.htmlContent,
+              });
+            if (step === 'error') throw new Error(msg);
+          } catch (parseErr) {
+            console.warn('Linha inválida:', line);
+          }
         }
       }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erro desconhecido';
+      console.error('❌ Erro:', message);
+      setEtapas((prev) =>
+        prev.map((e) => ({ ...e, msg: message, status: 'error' })),
+      );
+    } finally {
+      setLoading(false);
     }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Erro desconhecido';
-    console.error('❌ Erro:', message);
-    setEtapas((prev) => prev.map((e) => ({ ...e, msg: message, status: 'error' })));
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   return (
     <>
@@ -855,26 +866,26 @@ export default function GerarFlyerPage() {
                   placeholder="Ex: Concurso regido pelo Edital nº 001/2025..."
                 />
               </Field>
-              
-        <div className={styles.progressBox}>
-          {etapas.map((e, i) => (
-            <div
-              key={i}
-              className={`${styles.progressStep} ${styles[e.status]}`}
-            >
-              <span className={styles.progressIcon}>
-                {e.status === 'done'
-                  ? '✅'
-                  : e.status === 'loading'
-                    ? '⏳'
-                    : e.status === 'error'
-                      ? '❌'
-                      : '○'}
-              </span>
-              <span>{e.msg}</span>
-            </div>
-          ))}
-        </div>
+
+              <div className={styles.progressBox}>
+                {etapas.map((e, i) => (
+                  <div
+                    key={i}
+                    className={`${styles.progressStep} ${styles[e.status]}`}
+                  >
+                    <span className={styles.progressIcon}>
+                      {e.status === 'done'
+                        ? '✅'
+                        : e.status === 'loading'
+                          ? '⏳'
+                          : e.status === 'error'
+                            ? '❌'
+                            : '○'}
+                    </span>
+                    <span>{e.msg}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </>
         )}
@@ -899,36 +910,34 @@ export default function GerarFlyerPage() {
               {loading ? <span className={styles.spinner} /> : '✦'} Gerar e
               exportar flyer
             </button>
-            
           )}
         </div>
 
-        
-
         {resultado && (
-  <div className={styles.card} style={{ marginTop: '1rem' }}>
-    <div className={styles.sectionTitle}>Flyer gerado!</div>
-    <iframe
-      srcDoc={resultado.htmlContent}
-      style={{ width: '100%', height: '800px', border: 'none', borderRadius: 8 }}
-    />
-    <button
-      className={styles.btnPrimary}
-      style={{ marginTop: 12 }}
-      onClick={() => {
-        const blob = new Blob([resultado.htmlContent], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${form.nomeConc} - Flyer.html`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }}
-    >
-      ⬇ Baixar flyer
-    </button>
-  </div>
-)}
+          <div className={styles.card} style={{ marginTop: '1rem' }}>
+            <div className={styles.sectionTitle}>Flyer gerado!</div>
+            <img
+              src={resultado.jpgUrl}
+              alt="Flyer"
+              style={{ width: '100%', borderRadius: 8 }}
+            />
+
+            <a
+              href={resultado.jpgUrl}
+              download={`${form.nomeConc} - Flyer.jpg`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.btnPrimary}
+              style={{
+                marginTop: 12,
+                display: 'inline-flex',
+                textDecoration: 'none',
+              }}
+            >
+              ⬇ Baixar JPG
+            </a>
+          </div>
+        )}
       </div>
     </>
   );
